@@ -251,11 +251,12 @@
         // سيتم محاكاة البيانات في حال عدم توفر اتصال.
         const isAppwriteConfigured = !APPWRITE_ENDPOINT.includes('YOUR_APPWRITE');
 
-               // ---------------------------------------------------------------------
+        // ---------------------------------------------------------------------
         // القسم 2: إدارة الحالة العامة للتطبيق
         // ---------------------------------------------------------------------
         
         const appState = {
+            isReady: false, // <-- تعديل: حالة جديدة لتتبع جاهزية التطبيق
             currentUser: null,
             hotels: [],
             selectedHotel: null,
@@ -320,8 +321,20 @@
         // القسم 4: الدوال المساعدة (Helper Functions)
         // ---------------------------------------------------------------------
 
+        /**
+         * تعديل: الدالة الآن أكثر وضوحاً لتجنب أي مشاكل محتملة.
+         */
         function showView(viewId) {
-            Object.values(views).forEach(view => view.classList.add('hidden-view'));
+            // إخفاء جميع الواجهات بشكل صريح
+            views.loader.classList.add('hidden-view');
+            views.login.classList.add('hidden-view');
+            views.home.classList.add('hidden-view');
+            views.results.classList.add('hidden-view');
+            views.hotel.classList.add('hidden-view');
+            views.confirmation.classList.add('hidden-view');
+            views.myBookings.classList.add('hidden-view');
+
+            // إظهار الواجهة المطلوبة
             const viewToShow = views[viewId];
             if (viewToShow) {
                 viewToShow.classList.remove('hidden-view');
@@ -329,7 +342,7 @@
                 window.scrollTo(0, 0);
             } else {
                 console.error(`View with id "${viewId}" not found.`);
-                showView('home');
+                views.home.classList.remove('hidden-view'); // العودة للرئيسية كخيار افتراضي
             }
         }
         
@@ -400,7 +413,6 @@
             statusMessages.noResults.classList.add('hidden-view');
             
             appState.hotels.forEach(hotel => {
-                // في Appwrite، المعرف هو $id
                 const hotelCard = `
                     <div class="bg-white rounded-xl shadow-lg overflow-hidden transform hover:-translate-y-2 transition-transform duration-300 cursor-pointer" data-hotel-id="${hotel.$id}">
                         <img src="${hotel.image_url || 'https://placehold.co/400x250/e2e8f0/334155?text=فندق'}" alt="[صورة لفندق ${hotel.name}]" class="w-full h-48 object-cover">
@@ -493,7 +505,6 @@
             statusMessages.noBookings.classList.add('hidden-view');
 
             bookings.forEach(booking => {
-                // في Appwrite، العلاقات (relationships) يجب جلبها بشكل منفصل أو تصميمها بشكل مختلف
                 const hotelName = booking.hotel ? booking.hotel.name : 'فندق غير معروف';
                 const roomType = booking.room ? booking.room.type : 'غرفة غير معروفة';
                 const hotelImage = booking.hotel ? booking.hotel.image_url : 'https://placehold.co/150x100/e2e8f0/334155?text=صورة';
@@ -527,6 +538,7 @@
         
         async function handleAuth(e, isSignUp = false) {
             e.preventDefault();
+            if (!appState.isReady) return;
             const email = forms.loginForm.email.value;
             const password = forms.loginForm.password.value;
             
@@ -539,16 +551,13 @@
                 if (isSignUp) {
                     await account.create(ID.unique(), email, password);
                     showNotification('تم إنشاء الحساب بنجاح! قم بتسجيل الدخول الآن.', 'success');
-                    // إعادة النموذج لوضع تسجيل الدخول
                     const submitButton = forms.loginForm.querySelector('button[type="submit"]');
                     submitButton.textContent = 'تسجيل الدخول';
                     forms.loginForm.onsubmit = (event) => handleAuth(event, false);
                 } else {
-                    // *** تم تصحيح اسم الدالة هنا ***
                     await account.createEmailSession(email, password);
                     showNotification('تم تسجيل الدخول بنجاح!', 'success');
-                    await checkUserSession(); // تحديث حالة المستخدم بعد تسجيل الدخول
-                    showView('home');
+                    await checkUserSession(true); // تحديث الواجهة بعد تسجيل الدخول
                 }
             } catch (error) {
                 console.error('Authentication Error:', error);
@@ -556,37 +565,38 @@
             }
         }
 
+        /**
+         * تعديل: التحقق من جاهزية التطبيق قبل السماح بالبحث
+         */
         async function handleSearch(e) {
             e.preventDefault();
+            if (!appState.isReady) return;
+
             const destination = forms.searchForm.destination.value.trim();
             if (!destination) {
                 showNotification('الرجاء إدخال وجهة البحث.', 'error');
                 return;
             }
 
-            showView('loader');
+            views.loader.classList.remove('hidden-view'); // إظهار التحميل يدوياً
+            views.home.classList.add('hidden-view');
+            views.results.classList.add('hidden-view');
+
 
             try {
                 let hotelsList;
                 if (!isAppwriteConfigured) {
-                    console.warn("Appwrite not configured. Using mock data.");
                     await new Promise(res => setTimeout(res, 1000));
-                    // نستخدم المعرف $id في البيانات الوهمية لتكون متوافقة
                     hotelsList = generateMockHotels(10, destination).map(h => ({ ...h, $id: h.id }));
                 } else {
-                    // البحث عن الفنادق في مدينة معينة
                     const response = await databases.listDocuments(
                         DATABASE_ID,
                         HOTELS_COLLECTION_ID,
-                        [
-                            Query.search('city', destination) // يجب إنشاء فهرس 'fulltext' على حقل 'city'
-                        ]
+                        [ Query.search('city', destination) ]
                     );
                     hotelsList = response.documents;
                 }
                 
-                // للحصول على أقل سعر، نحتاج لجلب أسعار الغرف لكل فندق
-                // للتبسيط في هذا المثال، سنضع قيمة وهمية أو 0
                 appState.hotels = hotelsList.map(hotel => ({
                     ...hotel,
                     min_price: hotel.min_price || Math.floor(300 + Math.random() * 700)
@@ -603,29 +613,20 @@
         }
         
         async function handleHotelSelection(hotelId) {
+            if (!appState.isReady) return;
             showView('loader');
             try {
                  let hotel, rooms;
                  if (!isAppwriteConfigured) {
-                    console.warn("Appwrite not configured. Using mock data for hotel details.");
                     await new Promise(res => setTimeout(res, 1000));
                     hotel = appState.hotels.find(h => h.$id == hotelId);
                     rooms = generateMockRooms(hotelId, 5).map(r => ({ ...r, $id: r.id }));
                  } else {
-                    // جلب بيانات الفندق
-                    hotel = await databases.getDocument(
-                        DATABASE_ID,
-                        HOTELS_COLLECTION_ID,
-                        hotelId
-                    );
-                    
-                    // جلب الغرف المرتبطة بهذا الفندق
+                    hotel = await databases.getDocument(DATABASE_ID, HOTELS_COLLECTION_ID, hotelId);
                     const roomsResponse = await databases.listDocuments(
                         DATABASE_ID,
                         ROOMS_COLLECTION_ID,
-                        [
-                            Query.equal('hotel_id', hotelId)
-                        ]
+                        [ Query.equal('hotel_id', hotelId) ]
                     );
                     rooms = roomsResponse.documents;
                  }
@@ -684,12 +685,9 @@
             try {
                 let newBooking;
                 if (!isAppwriteConfigured) {
-                    console.warn("Appwrite not configured. Simulating booking.");
                     await new Promise(res => setTimeout(res, 1000));
                     newBooking = { ...bookingData, $id: `mock_booking_${Date.now()}` };
                 } else {
-                    // في Appwrite، يجب تحديد الصلاحيات عند الإنشاء
-                    // صلاحية القراءة للمستخدم نفسه
                     const permissions = [
                         Appwrite.Permission.read(Appwrite.Role.user(user.$id)),
                         Appwrite.Permission.update(Appwrite.Role.user(user.$id)),
@@ -715,7 +713,7 @@
         }
 
         async function handleShowMyBookings() {
-            if (!appState.currentUser) {
+            if (!appState.isReady || !appState.currentUser) {
                 showNotification('الرجاء تسجيل الدخول لعرض حجوزاتك.', 'error');
                 showView('login');
                 return;
@@ -726,7 +724,6 @@
             try {
                 let bookings;
                 if (!isAppwriteConfigured) {
-                    console.warn("Appwrite not configured. Using mock bookings.");
                     await new Promise(res => setTimeout(res, 1000));
                     bookings = [
                         { $id: 'b1', hotel_id: 'h1', room_id: 'r1', check_in_date: '2025-12-20', total_price: 500, status: 'Confirmed' },
@@ -736,15 +733,11 @@
                     const response = await databases.listDocuments(
                         DATABASE_ID,
                         BOOKINGS_COLLECTION_ID,
-                        [
-                            Query.equal('user_id', appState.currentUser.$id)
-                        ]
+                        [ Query.equal('user_id', appState.currentUser.$id) ]
                     );
                     bookings = response.documents;
                 }
                 
-                // جلب تفاصيل الفندق والغرفة لكل حجز (عملية مكلفة إذا كانت الحجوزات كثيرة)
-                // في تطبيق حقيقي، يمكن تخزين نسخة من اسم الفندق والغرفة في الحجز نفسه
                 const detailedBookings = await Promise.all(bookings.map(async (booking) => {
                     try {
                         const hotel = await databases.getDocument(DATABASE_ID, HOTELS_COLLECTION_ID, booking.hotel_id);
@@ -771,9 +764,7 @@
         async function handleLogout() {
             try {
                 await account.deleteSession('current');
-                appState.currentUser = null;
-                renderNav();
-                showView('home');
+                await checkUserSession(true);
                 showNotification('تم تسجيل الخروج بنجاح.', 'success');
             } catch (error) {
                 console.error('Logout Error:', error);
@@ -781,16 +772,22 @@
             }
         }
 
-        async function checkUserSession() {
+        /**
+         * تعديل: الدالة الآن تحدث الواجهة وتضبط حالة الجاهزية
+         * @param {boolean} forceHome - هل يجب الانتقال للرئيسية دائماً؟
+         */
+        async function checkUserSession(forceHome = false) {
             try {
-                const user = await account.get();
-                appState.currentUser = user;
+                appState.currentUser = await account.get();
             } catch (error) {
                 appState.currentUser = null;
             } finally {
                 renderNav();
-                // الانتقال للواجهة الرئيسية بعد التحقق من المستخدم
-                showView('home');
+                // فقط عند التحميل الأولي أو الخروج، اذهب للرئيسية
+                if (forceHome || !appState.isReady) {
+                    showView('home');
+                }
+                appState.isReady = true; // <-- تعديل: التطبيق جاهز الآن
             }
         }
         
@@ -799,11 +796,12 @@
         // ---------------------------------------------------------------------
 
         function initializeApp() {
-            document.addEventListener('DOMContentLoaded', () => {
+            document.addEventListener('DOMContentLoaded', async () => {
                 setMinCheckinDate();
                 
-                checkUserSession(); // التحقق من جلسة المستخدم عند أول تحميل
-
+                // تعديل: انتظر حتى يتم التحقق من المستخدم قبل ربط الأحداث
+                await checkUserSession();
+                
                 forms.loginForm.addEventListener('submit', (e) => handleAuth(e, false));
                 forms.searchForm.addEventListener('submit', handleSearch);
 
@@ -846,7 +844,7 @@
                     id: `mock_hotel_${i}`,
                     name: `${hotelNames[i % hotelNames.length]} ${hotelCity}`,
                     city: hotelCity,
-                    country: "الإمارات", // مثال
+                    country: "الإمارات",
                     address: `شارع الشيخ زايد ${i}, ${hotelCity}`,
                     description: descriptions[i % descriptions.length],
                     image_url: `https://placehold.co/400x250/007BFF/FFFFFF?text=فندق+${i}`,
