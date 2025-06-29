@@ -251,7 +251,7 @@
         // سيتم محاكاة البيانات في حال عدم توفر اتصال.
         const isAppwriteConfigured = !APPWRITE_ENDPOINT.includes('YOUR_APPWRITE');
 
-        // ---------------------------------------------------------------------
+               // ---------------------------------------------------------------------
         // القسم 2: إدارة الحالة العامة للتطبيق
         // ---------------------------------------------------------------------
         
@@ -544,7 +544,8 @@
                     submitButton.textContent = 'تسجيل الدخول';
                     forms.loginForm.onsubmit = (event) => handleAuth(event, false);
                 } else {
-                    await account.createEmailPasswordSession(email, password);
+                    // *** تم تصحيح اسم الدالة هنا ***
+                    await account.createEmailSession(email, password);
                     showNotification('تم تسجيل الدخول بنجاح!', 'success');
                     await checkUserSession(); // تحديث حالة المستخدم بعد تسجيل الدخول
                     showView('home');
